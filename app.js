@@ -2262,7 +2262,7 @@ class CPShoppingList {
       const deltaY = Math.abs(touch.clientY - st.startY);
       const deltaX = Math.abs(touch.clientX - st.startX);
 
-      if (deltaY > 10 || deltaX > 10) {
+      if (deltaY > 30 || deltaX > 30) {
         if (!st.isDragging) {
           st.isScrolling = true;
           clearTimeout(st.longPressTimer);
@@ -2288,12 +2288,6 @@ class CPShoppingList {
       }
 
       if (!st.isScrolling) {
-        const now = Date.now();
-        if (now - st.lastTapTime < 300) {
-          st.activeCard = null;
-          return;
-        }
-        st.lastTapTime = now;
 
         const boothId = st.activeCard.dataset.id;
         if (this.batchMode) {
