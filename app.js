@@ -2201,12 +2201,22 @@ class CPShoppingList {
   toggleBoothExpand(boothId) {
     if (!this.expandedBooths) this.expandedBooths = new Set();
     
+    const card = document.querySelector(`.booth-card[data-id="${boothId}"]`);
+    if (!card) return;
+
     if (this.expandedBooths.has(boothId)) {
       this.expandedBooths.delete(boothId);
+      card.classList.remove('expanded');
+      // 更新箭头方向
+      const icon = card.querySelector('.booth-expand-icon i');
+      if (icon) { icon.className = 'fas fa-chevron-down'; }
     } else {
       this.expandedBooths.add(boothId);
+      card.classList.add('expanded');
+      const icon = card.querySelector('.booth-expand-icon i');
+      if (icon) { icon.className = 'fas fa-chevron-up'; }
     }
-    this.render();
+    // 不再调用 this.render()，避免 DOM 重建导致触屏事件状态丢失
   }
 
   // 旧方法保留空壳，防止其他地方调用报错
