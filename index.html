@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>CP购物单</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+  <div id="app">
+    <!-- 顶部导航 -->
+    <header class="header">
+      <div class="header-left">
+        <button class="btn-icon" id="listSwitchBtn">
+          <i class="fas fa-list"></i>
+        </button>
+        <h1 id="currentListName">CP购物单</h1>
+      </div>
+      <div class="header-actions">
+        <button class="btn-icon" id="exportBtn" title="导出">
+          <i class="fas fa-download"></i>
+        </button>
+        <button class="btn-icon" id="batchModeBtn" title="批量管理">
+          <i class="fas fa-check-double"></i>
+        </button>
+        <button class="btn-icon" id="addBtn">
+          <i class="fas fa-plus"></i>
+        </button>
+      </div>
+    </header>
+
+    <!-- 导出菜单 -->
+    <div class="dropdown-menu" id="exportMenu">
+      <div class="menu-item" data-action="export-image">
+        <i class="fas fa-image"></i>
+        <span>导出为图片</span>
+      </div>
+      <div class="menu-item" data-action="export-excel">
+        <i class="fas fa-file-excel"></i>
+        <span>导出为Excel</span>
+      </div>
+      <div class="menu-item" data-action="share-link">
+        <i class="fas fa-share-alt"></i>
+        <span>生成分享链接</span>
+      </div>
+    </div>
+
+    <!-- 购物单切换菜单 -->
+    <div class="dropdown-menu list-menu" id="listMenu">
+      <div class="menu-header">
+        <span>我的购物单</span>
+        <button class="btn-sm btn-primary" id="newListBtn">
+          <i class="fas fa-plus"></i> 新建
+        </button>
+      </div>
+      <div class="list-items" id="listItems">
+        <!-- 动态渲染 -->
+      </div>
+    </div>
+
+    <!-- 添加菜单弹窗 -->
+    <div class="dropdown-menu" id="addMenu">
+      <div class="menu-item" data-action="new-single">
+        <i class="fas fa-store"></i>
+        <span>新建摊位</span>
+      </div>
+      <div class="menu-item" data-action="new-batch">
+        <i class="fas fa-layer-group"></i>
+        <span>批量新建</span>
+      </div>
+      <div class="menu-item" data-action="import-excel">
+        <i class="fas fa-file-excel"></i>
+        <span>导入Excel</span>
+      </div>
+      <div class="menu-item" data-action="import-text">
+        <i class="fas fa-file-alt"></i>
+        <span>文字识别导入</span>
+      </div>
+    </div>
+
+    <!-- 批量操作栏 -->
+    <div class="batch-action-bar" id="batchActionBar">
+      <div class="batch-select-info">
+        <button class="btn-text" id="selectAllBtn">全选</button>
+        <span id="selectedCount">已选 0 项</span>
+      </div>
+      <div class="batch-actions">
+        <button class="btn btn-danger btn-sm" id="batchDeleteBtn">
+          <i class="fas fa-trash"></i> 删除
+        </button>
+        <button class="btn btn-secondary btn-sm" id="cancelBatchBtn">取消</button>
+      </div>
+    </div>
+
+    <!-- 场馆筛选标签 -->
+    <div class="filter-tabs">
+      <button class="tab active" data-type="all">全部</button>
+      <button class="tab" data-type="doujin">同人馆</button>
+      <button class="tab" data-type="enterprise">企业馆</button>
+      <button class="tab" data-type="creative">创摊</button>
+    </div>
+
+    <!-- 摊位列表 -->
+    <main class="booth-list" id="boothList">
+      <!-- 动态渲染 -->
+    </main>
+
+    <!-- 空状态 -->
+    <div class="empty-state" id="emptyState">
+      <i class="fas fa-clipboard-list"></i>
+      <p>还没有摊位信息</p>
+      <p class="hint">点击右上角 + 添加摊位</p>
+    </div>
+
+    <!-- 摊位详情弹窗 -->
+    <div class="modal" id="detailModal">
+      <div class="modal-overlay"></div>
+      <div class="modal-content detail-content">
+        <div class="modal-header">
+          <h2 id="detailTitle">摊位详情</h2>
+          <button class="btn-icon btn-close"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="modal-body" id="detailBody">
+          <!-- 动态渲染 -->
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" id="editBoothBtn">
+            <i class="fas fa-edit"></i> 编辑
+          </button>
+          <button class="btn btn-danger" id="deleteBoothBtn">
+            <i class="fas fa-trash"></i> 删除
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 新建/编辑摊位弹窗 -->
+    <div class="modal" id="editModal">
+      <div class="modal-overlay"></div>
+      <div class="modal-content edit-content">
+        <div class="modal-header">
+          <h2 id="editTitle">新建摊位</h2>
+          <button class="btn-icon btn-close"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="modal-body">
+          <form id="boothForm">
+            <div class="form-group">
+              <label>摊位类型 <span class="required">*</span></label>
+              <div class="radio-group">
+                <label class="radio-label">
+                  <input type="radio" name="boothType" value="doujin" checked>
+                  <span>同人馆</span>
+                </label>
+                <label class="radio-label">
+                  <input type="radio" name="boothType" value="enterprise">
+                  <span>企业馆</span>
+                </label>
+                <label class="radio-label">
+                  <input type="radio" name="boothType" value="creative">
+                  <span>创摊</span>
+                </label>
+              </div>
+            </div>
+            
+            <div class="form-group">
+              <label for="boothNumber">摊位号</label>
+              <input type="text" id="boothNumber" placeholder="例: 壹A-01, AB01, 001">
+              <p class="form-hint" id="boothNumberHint">同人馆格式: 大写数字+字母-数字 (如: 壹A-01)</p>
+            </div>
+
+            <div class="form-group">
+              <label for="boothName">摊位名称</label>
+              <input type="text" id="boothName" placeholder="摊位名称（选填）">
+            </div>
+
+            <div class="form-group">
+              <label for="boothZone">所在专区/IP</label>
+              <input type="text" id="boothZone" placeholder="例: AAA、BBB">
+            </div>
+
+            <div class="form-group">
+              <label for="boothNote">备注</label>
+              <textarea id="boothNote" rows="3" placeholder="备注信息..."></textarea>
+              <div class="note-images" id="noteImages"></div>
+              <button type="button" class="btn btn-sm btn-secondary" id="addImageBtn">
+                <i class="fas fa-image"></i> 添加图片
+              </button>
+              <input type="file" id="imageInput" accept="image/*" multiple hidden>
+            </div>
+
+            <div class="form-group">
+              <label>制品清单</label>
+              <div class="products-table">
+                <div class="products-header">
+                  <span>制品名称</span>
+                  <span>价格</span>
+                  <span>数量</span>
+                  <span>状态</span>
+                  <span></span>
+                </div>
+                <div class="products-body" id="productsBody">
+                </div>
+                <button type="button" class="btn btn-sm btn-add-product" id="addProductBtn">
+                  <i class="fas fa-plus"></i> 添加制品
+                </button>
+              </div>
+              <div class="products-total">
+                总计: <span id="totalPrice">¥0.00</span>
+              </div>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" id="cancelEditBtn">取消</button>
+          <button class="btn btn-primary" id="saveBoothBtn">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal" id="batchModal">
+      <div class="modal-overlay"></div>
+      <div class="modal-content batch-content">
+        <div class="modal-header">
+          <h2>批量新建摊位</h2>
+          <button class="btn-icon btn-close"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="modal-body">
+          <div class="batch-tabs">
+            <button class="batch-tab active" data-mode="parse">智能解析</button>
+            <button class="batch-tab" data-mode="form">逐条填写</button>
+          </div>
+
+          <div class="batch-panel active" id="parsePanel">
+            <div class="form-group">
+              <label>粘贴文本内容</label>
+              <textarea id="batchInput" rows="8" placeholder="粘贴任意格式的摊位信息，系统会自动识别...
+
+支持的格式示例：
+壹A-01 AAA
+贰B-02 BBB
+CPA01 CCC
+或任意包含摊位信息的文本段落"></textarea>
+            </div>
+            <div class="form-group">
+              <label>识别预览 <span class="preview-count" id="parseCount"></span></label>
+              <div class="preview-list" id="batchPreviewList">
+                <p class="hint">输入文本后自动预览识别结果</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="batch-panel" id="formPanel">
+            <div class="form-group">
+              <label>摊位类型</label>
+              <div class="radio-group">
+                <label class="radio-label">
+                  <input type="radio" name="batchType" value="doujin" checked>
+                  <span>同人馆</span>
+                </label>
+                <label class="radio-label">
+                  <input type="radio" name="batchType" value="enterprise">
+                  <span>企业馆</span>
+                </label>
+                <label class="radio-label">
+                  <input type="radio" name="batchType" value="creative">
+                  <span>创摊</span>
+                </label>
+              </div>
+            </div>
+            <div class="batch-form-list" id="batchFormList">
+              <div class="batch-form-item" data-index="0">
+                <div class="batch-form-row">
+                  <input type="text" class="batch-number" placeholder="摊位号 *">
+                  <input type="text" class="batch-name" placeholder="摊位名称 *">
+                </div>
+                <div class="batch-form-row">
+                  <input type="text" class="batch-zone" placeholder="专区/IP (可选)">
+                  <button type="button" class="btn-remove-item" title="删除">
+                    <i class="fas fa-times"></i>
+                  </button>
+                </div>
+              </div>
+            </div>
+            <button type="button" class="btn btn-sm btn-add-item" id="addBatchItemBtn">
+              <i class="fas fa-plus"></i> 添加一条
+            </button>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary btn-close">取消</button>
+          <button class="btn btn-primary" id="batchCreateBtn">创建</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 文字识别导入弹窗 -->
+    <div class="modal" id="textImportModal">
+      <div class="modal-overlay"></div>
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>文字识别导入</h2>
+          <button class="btn-icon btn-close"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>粘贴文本内容</label>
+            <textarea id="textImportInput" rows="12" placeholder="粘贴摊位信息文本，支持以下格式：
+
+格式一（标签格式）：
+【摊位号】 壹A-01
+【摊位名】 ABC
+【专区/IP】XYZ
+【制品名】 ITEM001
+【制品价格】 30
+【数量】 2
+
+格式二（简单格式）：
+壹A-01 ABC
+贰B-02 DEF"></textarea>
+          </div>
+          <div class="form-group">
+            <label>识别预览</label>
+            <div class="preview-list" id="textPreviewList">
+              <p class="hint">输入文本后自动预览识别结果</p>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary btn-close">取消</button>
+          <button class="btn btn-primary" id="textImportBtn">导入</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 新建/编辑购物单弹窗 -->
+    <div class="modal" id="listModal">
+      <div class="modal-overlay"></div>
+      <div class="modal-content modal-sm">
+        <div class="modal-header">
+          <h2 id="listModalTitle">新建购物单</h2>
+          <button class="btn-icon btn-close"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="listNameInput">购物单名称 <span class="required">*</span></label>
+            <input type="text" id="listNameInput" placeholder="例：CP31 Day1、AAA">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary btn-close">取消</button>
+          <button class="btn btn-danger" id="deleteListBtn" style="display:none">删除</button>
+          <button class="btn btn-primary" id="saveListBtn">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <input type="file" id="excelInput" accept=".xlsx,.xls,.csv" hidden>
+
+    <div class="toast" id="toast"></div>
+
+    <!-- 自定义确认弹窗 -->
+    <div class="modal" id="confirmModal">
+      <div class="modal-overlay"></div>
+      <div class="modal-content modal-sm">
+        <div class="modal-header">
+          <h2 id="confirmTitle">确认</h2>
+          <button class="btn-icon btn-close"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="modal-body">
+          <p id="confirmMessage" style="font-size:15px;line-height:1.6;"></p>
+          <div id="confirmInputWrap" style="display:none;margin-top:12px;">
+            <input type="text" id="confirmInput" placeholder="">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" id="confirmCancelBtn">取消</button>
+          <button class="btn btn-danger" id="confirmOkBtn">确定</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
