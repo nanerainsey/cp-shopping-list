@@ -13,6 +13,7 @@ class CPShoppingList {
     this.batchMode = false;
     this.selectedBooths = new Set();
     this.expandedBooths = new Set();
+    this._cardTouchState = { startY: 0, startX: 0, isScrolling: false, longPressTimer: null, isDragging: false, isTouchActive: false, lastTapTime: 0, activeCard: null };
     
     this.init();
   }
@@ -20,6 +21,7 @@ class CPShoppingList {
   async init() {
     await this.loadData();
     this.bindEvents();
+    this.bindCardEventsDelegated();
     
     if (!this.loadFromShareLink()) {
       this.render();
@@ -2086,7 +2088,7 @@ class CPShoppingList {
 
     container.innerHTML = html;
 
-    this.bindCardEvents();
+    // 事件委托已在 init 中绑定，不再需要每次 render 重新绑定
   }
 
   renderBoothCard(booth) {
@@ -2207,101 +2209,112 @@ class CPShoppingList {
     this.render();
   }
 
-  bindCardEvents() {
-    const cards = document.querySelectorAll('.booth-card');
-    
-    cards.forEach(card => {
-      const inner = card.querySelector('.booth-card-inner');
-      let startY = 0;
-      let startX = 0;
-      let isScrolling = false;
-      let longPressTimer = null;
-      let isDragging = false;
-      let isTouchActive = false;
-      let lastTapTime = 0;
+  // 旧方法保留空壳，防止其他地方调用报错
+  bindCardEvents() {}
 
-      const handleStart = (e) => {
-        // 如果是 mouse 事件但刚刚处理过 touch 事件，跳过（防止 touch+mouse 双触发）
-        if (e.type === 'mousedown' && isTouchActive) return;
-        if (e.type === 'touchstart') isTouchActive = true;
+  // 事件委托版本 — 只绑定一次到容器，不随 render 重建
+  bindCardEventsDelegated() {
+    const container = document.getElementById('boothList');
+    if (!container) return;
+    const st = this._cardTouchState;
 
-        const touch = e.touches ? e.touches[0] : e;
-        startY = touch.clientY;
-        startX = touch.clientX;
-        isScrolling = false;
-        isDragging = false;
+    const findCard = (target) => {
+      const inner = target.closest('.booth-card-inner');
+      if (!inner) return null;
+      const card = inner.closest('.booth-card');
+      return card ? { card, inner } : null;
+    };
 
-        longPressTimer = setTimeout(() => {
-          isDragging = true;
-          this.startDrag(card, touch.clientY);
-        }, 500);
-      };
+    const handleStart = (e) => {
+      const hit = findCard(e.target);
+      if (!hit) return;
 
-      const handleMove = (e) => {
-        const touch = e.touches ? e.touches[0] : e;
-        const deltaY = Math.abs(touch.clientY - startY);
-        const deltaX = Math.abs(touch.clientX - startX);
-        
-        if (deltaY > 10 || deltaX > 10) {
-          if (!isDragging) {
-            isScrolling = true;
-            clearTimeout(longPressTimer);
-          }
+      if (e.type === 'mousedown' && st.isTouchActive) return;
+      if (e.type === 'touchstart') st.isTouchActive = true;
+
+      const touch = e.touches ? e.touches[0] : e;
+      st.startY = touch.clientY;
+      st.startX = touch.clientX;
+      st.isScrolling = false;
+      st.isDragging = false;
+      st.activeCard = hit.card;
+
+      clearTimeout(st.longPressTimer);
+      st.longPressTimer = setTimeout(() => {
+        st.isDragging = true;
+        this.startDrag(hit.card, touch.clientY);
+      }, 500);
+    };
+
+    const handleMove = (e) => {
+      if (!st.activeCard) return;
+      const touch = e.touches ? e.touches[0] : e;
+      const deltaY = Math.abs(touch.clientY - st.startY);
+      const deltaX = Math.abs(touch.clientX - st.startX);
+
+      if (deltaY > 10 || deltaX > 10) {
+        if (!st.isDragging) {
+          st.isScrolling = true;
+          clearTimeout(st.longPressTimer);
         }
+      }
 
-        if (isDragging && this.dragState.active) {
-          e.preventDefault();
-          this.handleDrag(touch.clientY);
-        }
-      };
+      if (st.isDragging && this.dragState.active) {
+        e.preventDefault();
+        this.handleDrag(touch.clientY);
+      }
+    };
 
-      const handleEnd = (e) => {
-        // 如果是 mouse 事件但刚刚处理过 touch 事件，跳过
-        if (e.type === 'mouseup' && isTouchActive) return;
+    const handleEnd = (e) => {
+      if (!st.activeCard) return;
+      if (e.type === 'mouseup' && st.isTouchActive) return;
 
-        clearTimeout(longPressTimer);
+      clearTimeout(st.longPressTimer);
 
-        if (isDragging && this.dragState.active) {
-          this.endDrag();
+      if (st.isDragging && this.dragState.active) {
+        this.endDrag();
+        st.activeCard = null;
+        return;
+      }
+
+      if (!st.isScrolling) {
+        const now = Date.now();
+        if (now - st.lastTapTime < 300) {
+          st.activeCard = null;
           return;
         }
+        st.lastTapTime = now;
 
-        if (!isScrolling) {
-          // 防抖：300ms 内的重复点击忽略
-          const now = Date.now();
-          if (now - lastTapTime < 300) return;
-          lastTapTime = now;
-
-          const boothId = card.dataset.id;
-          if (this.batchMode) {
-            this.toggleBoothSelection(boothId);
-          } else {
-            this.toggleBoothExpand(boothId);
-          }
+        const boothId = st.activeCard.dataset.id;
+        if (this.batchMode) {
+          this.toggleBoothSelection(boothId);
+        } else {
+          this.toggleBoothExpand(boothId);
         }
+      }
 
-        // touch 结束后设置一个短暂窗口，忽略随后的 mouse 事件
-        if (e.type === 'touchend') {
-          setTimeout(() => { isTouchActive = false; }, 400);
-        }
-      };
+      st.activeCard = null;
 
-      const handleLeave = () => {
-        clearTimeout(longPressTimer);
-        if (isDragging && this.dragState.active) {
-          this.endDrag();
-        }
-      };
+      if (e.type === 'touchend') {
+        setTimeout(() => { st.isTouchActive = false; }, 400);
+      }
+    };
 
-      inner.addEventListener('touchstart', handleStart, { passive: true });
-      inner.addEventListener('touchmove', handleMove, { passive: false });
-      inner.addEventListener('touchend', handleEnd);
-      
-      inner.addEventListener('mousedown', handleStart);
-      inner.addEventListener('mousemove', handleMove);
-      inner.addEventListener('mouseup', handleEnd);
-      inner.addEventListener('mouseleave', handleLeave);
-    });
+    const handleLeave = () => {
+      clearTimeout(st.longPressTimer);
+      if (st.isDragging && this.dragState.active) {
+        this.endDrag();
+      }
+      st.activeCard = null;
+    };
+
+    container.addEventListener('touchstart', handleStart, { passive: true });
+    container.addEventListener('touchmove', handleMove, { passive: false });
+    container.addEventListener('touchend', handleEnd);
+    container.addEventListener('mousedown', handleStart);
+    container.addEventListener('mousemove', handleMove);
+    container.addEventListener('mouseup', handleEnd);
+    container.addEventListener('mouseleave', handleLeave);
   }
 
   startDrag(card, startY) {
