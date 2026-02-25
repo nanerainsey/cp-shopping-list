@@ -2217,15 +2217,19 @@ class CPShoppingList {
       let isScrolling = false;
       let longPressTimer = null;
       let isDragging = false;
-      let isMouseDown = false;
+      let isTouchActive = false;
+      let lastTapTime = 0;
 
       const handleStart = (e) => {
+        // 如果是 mouse 事件但刚刚处理过 touch 事件，跳过（防止 touch+mouse 双触发）
+        if (e.type === 'mousedown' && isTouchActive) return;
+        if (e.type === 'touchstart') isTouchActive = true;
+
         const touch = e.touches ? e.touches[0] : e;
         startY = touch.clientY;
         startX = touch.clientX;
         isScrolling = false;
         isDragging = false;
-        isMouseDown = true;
 
         longPressTimer = setTimeout(() => {
           isDragging = true;
@@ -2251,11 +2255,11 @@ class CPShoppingList {
         }
       };
 
-      const handleEnd = () => {
+      const handleEnd = (e) => {
+        // 如果是 mouse 事件但刚刚处理过 touch 事件，跳过
+        if (e.type === 'mouseup' && isTouchActive) return;
+
         clearTimeout(longPressTimer);
-        
-        if (!isMouseDown) return;
-        isMouseDown = false;
 
         if (isDragging && this.dragState.active) {
           this.endDrag();
@@ -2263,12 +2267,22 @@ class CPShoppingList {
         }
 
         if (!isScrolling) {
+          // 防抖：300ms 内的重复点击忽略
+          const now = Date.now();
+          if (now - lastTapTime < 300) return;
+          lastTapTime = now;
+
           const boothId = card.dataset.id;
           if (this.batchMode) {
             this.toggleBoothSelection(boothId);
           } else {
             this.toggleBoothExpand(boothId);
           }
+        }
+
+        // touch 结束后设置一个短暂窗口，忽略随后的 mouse 事件
+        if (e.type === 'touchend') {
+          setTimeout(() => { isTouchActive = false; }, 400);
         }
       };
 
@@ -2277,7 +2291,6 @@ class CPShoppingList {
         if (isDragging && this.dragState.active) {
           this.endDrag();
         }
-        isMouseDown = false;
       };
 
       inner.addEventListener('touchstart', handleStart, { passive: true });
