@@ -522,10 +522,16 @@ class CPShoppingList {
   }
 
   compressData(str) {
-    return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, (_, p1) => String.fromCharCode('0x' + p1)));
+    return LZString.compressToEncodedURIComponent(str);
   }
 
   decompressData(str) {
+    // 先尝试 lz-string 解压，失败则回退到旧的 btoa 解码（兼容旧链接）
+    try {
+      const result = LZString.decompressFromEncodedURIComponent(str);
+      if (result) return result;
+    } catch (e) {}
+    // 回退: 旧的 btoa 格式
     return decodeURIComponent(atob(str).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join(''));
   }
 
