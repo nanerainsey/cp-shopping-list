@@ -3,3 +3,10 @@ package.json
 package-lock.json
 screenshot_*.png
 .playwright-cli/
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+.env*
+!.env.example
