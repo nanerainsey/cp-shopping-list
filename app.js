@@ -1607,96 +1607,261 @@ class CPShoppingList {
     if (!file) return;
 
     try {
-      const data = await this.readExcelFile(file);
-      let imported = 0;
-      const boothList = [];
+      const rawData = await this.readExcelFile(file);
+      if (!rawData || rawData.length < 2) {
+        this.showToast('文件为空');
+        document.getElementById('excelInput').value = '';
+        return;
+      }
+
+      // === 智能解析 Excel（与小程序 parser.js 一致） ===
+
+      const HEADER_KEYWORDS = {
+        number: ['摊位号', '编号', '摊号', '展位号', '位置', '摊位编号', '展位', '社团摊位号', 'booth', 'number', 'no', 'id'],
+        name: ['摊位名称', '摊位名', '社团名称', '社团名', '名称', '摊名', '社团', '店名', '名字', 'name', 'booth name', 'circle'],
+        zone: ['专区', 'IP', 'ip', '所属', '分区', '区域', '作品', '同人', 'fandom', 'zone', 'area', 'category'],
+        type: ['类型', '场馆', '馆', '摊位类型', 'type'],
+        note: ['备注', '说明', '注释', '想买', '备忘', 'note', 'memo', 'remark'],
+        product: ['制品', '制品名', '制品名称', '展品名称', '展品名', '展品', '商品', '商品名', '物品', '货品', '产品', 'product', 'item', 'goods'],
+        price: ['价格', '单价', '售价', '金额', 'price', 'cost'],
+        qty: ['数量', '个数', '件数', '购买数量', 'quantity', 'qty', 'count', 'amount']
+      };
+
+      const matchKW = (text, keywords) => {
+        if (!text) return false;
+        const lower = String(text).toLowerCase().trim();
+        if (!lower) return false;
+        return keywords.some(kw => {
+          const lk = kw.toLowerCase();
+          return lower === lk || lower.includes(lk) || lk.includes(lower);
+        });
+      };
+
+      const isHeaderRow = (row) => {
+        if (!Array.isArray(row)) return false;
+        let matched = 0;
+        const fields = Object.keys(HEADER_KEYWORDS);
+        const seen = new Set();
+        for (const cell of row) {
+          if (!cell) continue;
+          for (const field of fields) {
+            if (seen.has(field)) continue;
+            if (matchKW(cell, HEADER_KEYWORDS[field])) {
+              seen.add(field);
+              matched++;
+              if (matched >= 2) return true;
+            }
+          }
+        }
+        return false;
+      };
+
+      const buildColumnMap = (headerRow) => {
+        const map = {};
+        const fields = Object.keys(HEADER_KEYWORDS);
+        const usedCols = new Set();
+
+        // 第一遍：精确匹配（cell === keyword）
+        headerRow.forEach((cell, colIdx) => {
+          if (!cell) return;
+          const lower = String(cell).toLowerCase().trim();
+          if (!lower) return;
+          for (const field of fields) {
+            if (map[field] !== undefined) continue;
+            const exact = HEADER_KEYWORDS[field].some(kw => lower === kw.toLowerCase());
+            if (exact) {
+              map[field] = colIdx;
+              usedCols.add(colIdx);
+              break;
+            }
+          }
+        });
+
+        // 第二遍：模糊匹配（includes），跳过已分配的列和字段
+        headerRow.forEach((cell, colIdx) => {
+          if (!cell || usedCols.has(colIdx)) return;
+          for (const field of fields) {
+            if (map[field] !== undefined) continue;
+            if (matchKW(cell, HEADER_KEYWORDS[field])) {
+              map[field] = colIdx;
+              usedCols.add(colIdx);
+              break;
+            }
+          }
+        });
+
+        return map;
+      };
+
+      const inferColumnMap = (dataRows) => {
+        if (!dataRows.length) return {};
+        const colCount = Math.max(...dataRows.map(r => (r ? r.length : 0)));
+        if (colCount === 0) return {};
+        const stats = Array.from({ length: colCount }, () => ({ boothHits: 0, priceHits: 0, textHits: 0, total: 0 }));
+        const sampleRows = dataRows.slice(0, Math.min(50, dataRows.length));
+        sampleRows.forEach(row => {
+          if (!Array.isArray(row)) return;
+          row.forEach((cell, ci) => {
+            if (ci >= colCount) return;
+            const s = stats[ci];
+            const val = String(cell || '').trim();
+            if (!val) return;
+            s.total++;
+            s.textHits++;
+            const { number } = this.extractBoothNumber(val);
+            if (number) s.boothHits++;
+            if (/^\d+(\.\d+)?$/.test(val)) s.priceHits++;
+          });
+        });
+
+        const map = {};
+        let bestBoothCol = -1, bestBoothRate = 0;
+        stats.forEach((s, ci) => {
+          if (s.total === 0) return;
+          const rate = s.boothHits / s.total;
+          if (rate > 0.4 && rate > bestBoothRate) { bestBoothRate = rate; bestBoothCol = ci; }
+        });
+        if (bestBoothCol >= 0) map.number = bestBoothCol;
+
+        let bestPriceCol = -1, bestPriceRate = 0;
+        stats.forEach((s, ci) => {
+          if (ci === map.number || s.total === 0) return;
+          const rate = s.priceHits / s.total;
+          if (rate > 0.6 && rate > bestPriceRate) { bestPriceRate = rate; bestPriceCol = ci; }
+        });
+        if (bestPriceCol >= 0) map.price = bestPriceCol;
+
+        const remaining = [];
+        stats.forEach((s, ci) => {
+          if (ci === map.number || ci === map.price) return;
+          if (s.textHits > 0) remaining.push(ci);
+        });
+        if (remaining.length >= 1) map.product = remaining[0];
+        if (remaining.length >= 2) map.name = remaining[1];
+        if (remaining.length >= 3) map.note = remaining[2];
+        return map;
+      };
+
+      const getCell = (row, colMap, field) => {
+        if (colMap[field] === undefined) return '';
+        const val = row[colMap[field]];
+        if (val === undefined || val === null) return '';
+        return String(val).trim();
+      };
+
+      const isJunkRow = (row, colMap) => {
+        if (!Array.isArray(row)) return true;
+        const numberVal = getCell(row, colMap, 'number');
+        const productVal = getCell(row, colMap, 'product');
+        const firstCell = String(row[0] || '').trim();
+        if (/^(COMICUP|CP\d|共\d|合计|总计|统计)/i.test(firstCell)) return true;
+        if (!numberVal && !productVal) return true;
+        return false;
+      };
+
+      // Phase 1: 定位表头行
+      let headerRowIdx = -1;
+      let colMap = {};
+      const scanLimit = Math.min(10, rawData.length);
+      for (let i = 0; i < scanLimit; i++) {
+        if (isHeaderRow(rawData[i])) {
+          headerRowIdx = i;
+          colMap = buildColumnMap(rawData[i]);
+          break;
+        }
+      }
+
+      let dataRows;
+      if (headerRowIdx >= 0) {
+        dataRows = rawData.slice(headerRowIdx + 1);
+      } else {
+        let startIdx = 0;
+        let foundStart = false;
+        for (let i = 0; i < Math.min(10, rawData.length); i++) {
+          const row = rawData[i];
+          if (!Array.isArray(row)) continue;
+          for (const cell of row) {
+            const { number } = this.extractBoothNumber(cell);
+            if (number) { startIdx = i; foundStart = true; break; }
+          }
+          if (foundStart) break;
+        }
+        dataRows = rawData.slice(startIdx);
+        colMap = inferColumnMap(dataRows);
+      }
+
+      if (colMap.number === undefined && colMap.product === undefined) {
+        this.showToast('未识别到有效数据');
+        document.getElementById('excelInput').value = '';
+        return;
+      }
+
+      // Phase 2: 逐行解析 + 同摊位号合并
+      const boothMap = new Map();
       let lastBooth = null;
       let lastZone = '';
-      let lastType = '';
 
-      data.forEach(row => {
-        const numberRaw = this.findColumnValue(row, ['摊位号', '编号', '摊号', '展位号', '位置', '摊位编号', '展位', 'booth', 'number', 'no', 'id']);
-        const name = this.findColumnValue(row, ['摊位名称', '摊位名', '名称', '摊名', '社团', '社团名', '店名', '名字', 'name', 'booth name', 'circle']);
-        const zone = this.findColumnValue(row, ['专区', 'IP', 'ip', '所属', '分区', '区域', '作品', '同人', 'fandom', 'zone', 'area', 'category']);
-        const typeRaw = this.findColumnValue(row, ['类型', '场馆', '馆', '摊位类型', 'type']);
-        const noteRaw = this.findColumnValue(row, ['备注', '说明', '注释', '想买', '备忘', 'note', 'memo', 'remark']);
+      dataRows.forEach(row => {
+        if (!Array.isArray(row)) return;
+        if (isJunkRow(row, colMap)) return;
 
-        const productName = this.findColumnValue(row, ['制品', '制品名', '制品名称', '商品', '商品名', '物品', '货品', '产品', 'product', 'item', 'goods']);
-        const productPrice = this.findColumnValue(row, ['价格', '单价', '售价', '金额', 'price', 'cost']);
-        const productQty = this.findColumnValue(row, ['数量', '个数', '件数', '购买数量', 'quantity', 'qty', 'count', 'amount']);
+        const numberRaw = getCell(row, colMap, 'number');
+        const nameRaw = getCell(row, colMap, 'name');
+        const zoneRaw = getCell(row, colMap, 'zone');
+        const noteRaw = getCell(row, colMap, 'note');
+        const productRaw = getCell(row, colMap, 'product');
+        const priceRaw = getCell(row, colMap, 'price');
+        const qtyRaw = getCell(row, colMap, 'qty');
 
-        if (zone) lastZone = String(zone).trim();
-        if (typeRaw) lastType = String(typeRaw).trim();
+        if (zoneRaw) lastZone = zoneRaw;
 
-        const { number: extractedNumber, extra: extraFromNumber } = this.extractBoothNumber(numberRaw);
-        
-        const hasValidNumber = extractedNumber !== null;
-        const hasBoothInfo = hasValidNumber || name;
-        const hasProductInfo = productName;
+        const { number: extractedNumber } = this.extractBoothNumber(numberRaw);
 
-        if (!hasBoothInfo && !hasProductInfo) return;
-
-        if (hasBoothInfo) {
-          const displayNumber = extractedNumber || '未知';
-          const displayName = name || '未命名';
-
-          let type = 'doujin';
-          const typeStr = (typeRaw ? String(typeRaw) : lastType).toLowerCase();
-          if (typeStr.includes('企业') || typeStr.includes('enterprise')) {
-            type = 'enterprise';
-          } else if (typeStr.includes('创') || typeStr.includes('creative')) {
-            type = 'creative';
-          } else if (displayNumber !== '未知') {
-            type = this.inferBoothType(displayNumber);
+        if (extractedNumber && boothMap.has(extractedNumber)) {
+          lastBooth = boothMap.get(extractedNumber);
+          if (nameRaw && (!lastBooth.name || lastBooth.name === '未命名')) {
+            lastBooth.name = nameRaw;
           }
-
-          const noteParts = [];
-          if (noteRaw) noteParts.push(String(noteRaw).trim());
-          if (extraFromNumber) noteParts.push(extraFromNumber);
-          if (!hasValidNumber && numberRaw) {
-            noteParts.push(`原始摊位号: ${String(numberRaw).trim()}`);
-          }
-
+        } else if (extractedNumber) {
+          const type = this.inferBoothType(extractedNumber);
           lastBooth = {
             id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
             type,
-            number: String(displayNumber).trim(),
-            name: String(displayName).trim(),
-            zone: zone ? String(zone).trim() : lastZone,
-            note: noteParts.join('\n'),
+            number: extractedNumber,
+            name: nameRaw || '未命名',
+            zone: zoneRaw || lastZone,
+            note: noteRaw || '',
             images: [],
             products: [],
             pinned: false,
             createdAt: Date.now()
           };
-          boothList.push(lastBooth);
+          boothMap.set(extractedNumber, lastBooth);
         }
 
-        if (hasProductInfo && lastBooth) {
-          const price = parseFloat(String(productPrice).replace(/[¥￥,，]/g, '')) || 0;
-          const qty = parseInt(String(productQty)) || 1;
-          
+        if (productRaw && lastBooth) {
+          const price = parseFloat(String(priceRaw).replace(/[¥￥,，]/g, '')) || 0;
+          const qty = parseInt(String(qtyRaw)) || 1;
           lastBooth.products.push({
-            name: String(productName).trim(),
-            price: price,
-            quantity: qty
+            name: productRaw,
+            price,
+            quantity: qty,
+            status: 'pending'
           });
         }
       });
 
-      boothList.forEach(booth => {
-        this.booths.push(booth);
-        imported++;
-      });
+      const boothList = Array.from(boothMap.values());
 
-      if (imported > 0) {
+      if (boothList.length > 0) {
+        boothList.forEach(booth => this.booths.push(booth));
         this.saveData();
         this.render();
         const totalProducts = boothList.reduce((sum, b) => sum + b.products.length, 0);
         if (totalProducts > 0) {
-          this.showToast(`成功导入 ${imported} 个摊位，${totalProducts} 件制品`);
+          this.showToast(`成功导入 ${boothList.length} 个摊位，${totalProducts} 件制品`);
         } else {
-          this.showToast(`成功导入 ${imported} 个摊位`);
+          this.showToast(`成功导入 ${boothList.length} 个摊位`);
         }
       } else {
         this.showToast('未识别到有效数据');
@@ -1718,22 +1883,12 @@ class CPShoppingList {
           const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
           const data = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
           
-          if (data.length <= 1) {
+          if (data.length < 1) {
             resolve([]);
             return;
           }
 
-          const headers = data[0];
-          const rows = data.slice(1).map(row => {
-            const obj = {};
-            headers.forEach((h, i) => {
-              obj[h] = row[i];
-              obj[i] = row[i];
-            });
-            return obj;
-          });
-
-          resolve(rows);
+          resolve(data);
         } catch (e) {
           reject(e);
         }
